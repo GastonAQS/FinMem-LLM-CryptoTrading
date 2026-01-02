@@ -23,6 +23,14 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 load_dotenv()
 
+# Define absolute paths
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(SCRIPT_DIR)  # Project root directory
+DATA_DIR = os.path.join(BASE_DIR, "data")
+TEMP_DIR = os.path.join(DATA_DIR, "temp")
+RAW_DIR = os.path.join(DATA_DIR, "01_raw")
+INTERMEDIATE_DIR = os.path.join(DATA_DIR, "02_intermediate")
+
 
 def round_to_next_day(date: pl.Expr) -> pl.Expr:
     hour = date.dt.hour()
@@ -100,8 +108,8 @@ def query_one_record(args: Tuple[date, str]) -> None:
     date, symbol = args
     next_date = date + timedelta(days=1)
     request_header = {
-        "Apca-Api-Key-Id": os.environ.get("ALPACA_KEY"),
-        "Apca-Api-Secret-Key": os.environ.get("ALPACA_KEY_SECRET_KEY"),
+        "Apca-Api-Key-Id": os.environ.get("ALPACA_KEY", "PKNAUPDPP4U2L2TXQ36MBREV3K"),
+        "Apca-Api-Secret-Key": os.environ.get("ALPACA_KEY_SECRET_KEY", "4htZ3wQCQgoDwryEK4kWdjGJtdprtYsETVqTbYsj6fPp"),
     }
     container = ParseRecordContainer(symbol)
 
@@ -140,15 +148,24 @@ def query_one_record(args: Tuple[date, str]) -> None:
 
     result = container.pop(align_next_date=True)
     if result is not None:
-        result.write_parquet(os.path.join("data", "temp", f"{uuid4()}.parquet"))
+        result.write_parquet(os.path.join(TEMP_DIR, f"{uuid4()}.parquet"))
 
 
 def main_sync() -> None:
+    # Check if price data file exists, otherwise provide helpful error message
+    price_data_path = os.path.join(RAW_DIR, "price_data.parquet")
+    if not os.path.exists(price_data_path):
+        raise FileNotFoundError(
+            f"Price data file not found at: {price_data_path}\n"
+            f"Please provide a parquet file with columns 'est_time' (datetime) and 'equity' (stock symbols)\n"
+            f"This file should contain the list of stocks and date ranges you want to download news for."
+        )
+
     # load data
-    data = pl.read_parquet(os.path.join("data", "03_primary", "price_data.parquet"))
-    if os.path.exists(os.path.join("data", "temp")):
-        shutil.rmtree(os.path.join("data", "temp"))
-    os.mkdir(os.path.join("data", "temp"))
+    data = pl.read_parquet(price_data_path)
+    if os.path.exists(TEMP_DIR):
+        shutil.rmtree(TEMP_DIR)
+    os.mkdir(TEMP_DIR)
 
     query_data = (
         data.select([pl.col("est_time").dt.date().alias("date"), pl.col("equity")])
@@ -167,11 +184,11 @@ def main_sync() -> None:
             if (i + 1) % 3000 == 0:
                 time.sleep(90)
     record_dfs = [
-        pl.read_parquet(os.path.join("data", "temp", f))
-        for f in os.listdir(os.path.join("data", "temp"))
+        pl.read_parquet(os.path.join(TEMP_DIR, f))
+        for f in os.listdir(TEMP_DIR)
     ]
     df = pl.concat(record_dfs)
-    df.write_parquet(os.path.join("data", "03_primary", "news.parquet"))
+    df.write_parquet(os.path.join(RAW_DIR, "news.parquet"))
     print(df.shape)
 
 
