@@ -22,6 +22,12 @@ dependencies = [
     "langchain-community>=0.0.15,<0.1.0",
     "torch>=2.2.0",
     "transformers>=4.37.2,<5.0.0",
+    "pandas>=2.3.3",
+    "yfinance>=1.0",
+    "cleantext>=1.1.4",
+    "levenshtein>=0.27.3",
+    "pyarrow>=22.0.0",
+    "langchain-together>=0.1.2",
 ]
 
 [[tool.uv.index]]

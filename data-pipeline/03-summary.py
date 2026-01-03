@@ -9,9 +9,7 @@ import threading
 
 
 model = \
-Model_Factory.create_model('chatgpt',
-                           key='API_KEY',
-                           model_name="gpt-3.5-turbo-16k-0613")
+Model_Factory.create_model('llama')
 # model = Model_Factory.create_model('dummy')
 
 '''

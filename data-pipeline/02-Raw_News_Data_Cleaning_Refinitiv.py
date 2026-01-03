@@ -8,6 +8,13 @@ import yfinance as yf
 from cleantext import clean
 from Levenshtein import ratio
 from datetime import datetime, timedelta
+import os
+import polars as pl
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(SCRIPT_DIR)  # Project root directory
+DATA_DIR = os.path.join(BASE_DIR, "data")
+RAW_DIR = os.path.join(DATA_DIR, "01_raw")
 
 def extract_update_number(headline):
     """
@@ -110,21 +117,27 @@ def clean_text(text):
         text (str): The text string to be cleaned.
 
     Returns:
-        str: The cleaned text string.
+        str: The cleaned text string, or empty string if input is None/NaN.
     """
+    # Handle None, NaN, or empty values
+    if pd.isna(text) or text is None or text == '':
+        return ''
+
+    # Convert to string if not already
+    text = str(text)
+
+    # Use clean-text library with correct API
+    # clean_all=False to control what gets cleaned
+    # Keep numbers, digits, currency symbols, and punctuation (important for financial text)
     return clean(text,
-                 fix_unicode=True,
-                 to_ascii=True,
-                 lower=True,
-                 no_line_breaks=True,
-                 no_urls=True,
-                 no_emails=True,
-                 no_phone_numbers=True,
-                 no_numbers=False,
-                 no_digits=False,
-                 no_currency_symbols=False,
-                 no_punct=False,
-                 lang="en"
+                 clean_all=False,
+                 extra_spaces=True,
+                 stemming=False,
+                 stopwords=False,
+                 lowercase=True,
+                 numbers=False,      # Keep numbers
+                 punct=False,        # Keep punctuation
+                 stp_lang='english'
                 )
 
 def drop_similar_records(df, column_name, r):
@@ -174,12 +187,12 @@ def drop_similar_records(df, column_name, r):
 
 def adjust_trading_days(start_day, end_day, ticker, df):
     """
-    Adjusts the dates in a DataFrame to the nearest following trading days 
+    Adjusts the dates in a DataFrame to the nearest following trading days
     based on stock data from Yahoo Finance.
 
-    This function takes a DataFrame and modifies its date column to ensure that 
-    each date falls on a trading day. Non-trading days are adjusted to the next 
-    trading day. Trading days are determined based on the stock data for the 
+    This function takes a DataFrame and modifies its date column to ensure that
+    each date falls on a trading day. Non-trading days are adjusted to the next
+    trading day. Trading days are determined based on the stock data for the
     specified ticker within the given date range.
 
     Input:
@@ -189,7 +202,7 @@ def adjust_trading_days(start_day, end_day, ticker, df):
         df (pandas.DataFrame): The DataFrame containing a 'date' column to be adjusted.
 
     Output:
-        pandas.DataFrame: The input DataFrame with its 'date' column adjusted to 
+        pandas.DataFrame: The input DataFrame with its 'date' column adjusted to
                           the nearest following trading days.
 
     Notes:
@@ -200,24 +213,38 @@ def adjust_trading_days(start_day, end_day, ticker, df):
     """
 
     # Download stock data from Yahoo Finance
-    df_yf = yf.download(ticker, start=start_day, end=end_day)
+    print(f"Downloading trading days for {ticker} from {start_day} to {end_day}...")
+    df_yf = yf.download(ticker, start=start_day, end=end_day, progress=False)
     df_yf = df_yf.reset_index()
-    df_yf['Date'] = pd.to_datetime(df_yf['Date'])
+    df_yf['Date'] = pd.to_datetime(df_yf['Date']).dt.normalize()
 
-    # Convert the 'date' column of the input dataframe to datetime
-    df['date'] = pd.to_datetime(df['date'])
+    # Convert the 'date' column of the input dataframe to datetime and normalize (remove time)
+    df['date'] = pd.to_datetime(df['date']).dt.normalize()
 
-    # Get the trading dates from the Yahoo Finance data
-    yf_date = df_yf['Date'].tolist()
+    # Get the trading dates from the Yahoo Finance data as a set for faster lookup
+    yf_date_set = set(df_yf['Date'])
+    max_trading_date = df_yf['Date'].max()
 
     # Initialize an empty list to hold the adjusted dates
     trading = []
 
     # Loop over each date in the input dataframe
     for day in df['date']:
+        original_day = day
+        max_iterations = 365  # Prevent infinite loops
+        iterations = 0
+
         # While the day is not a trading day, add one day
-        while day not in yf_date:
+        while day not in yf_date_set:
             day += timedelta(days=1)
+            iterations += 1
+
+            # Safety check: if we've gone too far or past the max trading date
+            if iterations > max_iterations or day > max_trading_date + timedelta(days=30):
+                print(f"Warning: Could not find trading day for {original_day}, using closest: {max_trading_date}")
+                day = max_trading_date
+                break
+
         # Append the adjusted trading day to the list
         trading.append(day)
 
@@ -247,6 +274,10 @@ def main(df, ticker, save_path, start_day, end_day):
     """
 
     # Initial data processing steps: extract update numbers, create new headlines, and sort
+    # Rename 'title' to 'headline' if needed for compatibility with functions
+    if 'title' in df.columns and 'headline' not in df.columns:
+        df = df.rename(columns={'title': 'headline'})
+
     df['update_number'] = df['headline'].apply(extract_update_number)
     df['new_headline'] = df.apply(create_new_headline, axis=1)
     df_sorted = df.sort_values(by='update_number', ascending=False)
@@ -264,7 +295,7 @@ def main(df, ticker, save_path, start_day, end_day):
 
     # Resetting symbols and timestamps, and cleaning text
     replace_column_values(df_final, 'symbols', ticker)
-    df_final['dates'] = df_final['dates'].str[:19]
+    df_final['dates'] = df_final['dates']
     df_final['dates'] = pd.to_datetime(df_final['dates'])
     df_final['date'] = df_final['dates'].apply(calculate_date)
     df_final['cleaned_body'] = df_final['body'].apply(clean_text)
@@ -302,10 +333,35 @@ def main(df, ticker, save_path, start_day, end_day):
     # print(df_drop_similar.head(10))
 
 if __name__ == "__main__":
-    ticker = 'PFE'
-    df = pd.read_csv('PFE2021-08-01-2023-05-30.csv')
-    save_path = 'cleaned_PFE2021-08-01-2023-05-30.csv'
-    main(df, ticker, save_path)
+    # Read as Polars for metadata extraction
+    df_pl = pl.read_parquet(os.path.join(RAW_DIR, "news.parquet"))
+    start_date = df_pl["date"].min()
+    end_date = df_pl["date"].max()
+
+    # Convert to Pandas for processing (main function expects Pandas DataFrame)
+    df_pd = df_pl.to_pandas()
+
+    # Rename columns to match expected schema
+    # Alpaca API uses 'datetime' but the cleaning script expects 'dates'
+    if 'datetime' in df_pd.columns and 'dates' not in df_pd.columns:
+        df_pd = df_pd.rename(columns={'datetime': 'dates'})
+
+    # Rename 'equity' to 'symbols' if needed
+    if 'equity' in df_pd.columns and 'symbols' not in df_pd.columns:
+        df_pd = df_pd.rename(columns={'equity': 'symbols'})
+
+    # Rename 'content' to 'body' if needed
+    if 'summary' in df_pd.columns and 'body' not in df_pd.columns:
+        df_pd = df_pd.rename(columns={'summary': 'body'})
+
+    # Add item_id if not present (required for dropping columns later)
+    if 'item_id' not in df_pd.columns:
+        df_pd['item_id'] = range(len(df_pd))
+
+    for ticker in df_pl.select("equity").unique().to_series().to_list():
+        ticker_df = df_pd[df_pd['symbols'] == ticker].copy()
+        save_path = os.path.join(RAW_DIR, f'cleaned_{ticker}_{start_date.strftime("%Y-%m-%d")}-{end_date.strftime("%Y-%m-%d")}.csv')
+        main(ticker_df, ticker, save_path, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
 
 # PFE,JPM,XOM,GS,C,MRNA,CVX,GM,F,MS,BAC,JNJ,WMT,NVDA,DIS,MRK
 

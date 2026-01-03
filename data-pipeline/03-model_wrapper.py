@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import openai
 from langchain_together import Together
 from tenacity import retry, stop_after_attempt, wait_fixed
+from transformers import AutoModelForCausalLM, LlamaTokenizerFast
 
 MAX_ATTEMPTS = 5
 WAIT_TIME = 10
@@ -31,6 +32,21 @@ class Chatgpt(Model_Wrapper):
             ]
         )
         summary = response['choices'][0]['message']['content']
+        return summary
+
+
+class Llama(Model_Wrapper):
+    def __init__(self, model_name):
+        self.model_name = model_name
+        self.model = AutoModelForCausalLM.from_pretrained("second-state/FinGPT-MT-Llama-3-8B-LoRA-GGUF", dtype="auto", device_map="auto")
+        self.tokenizer = LlamaTokenizerFast.from_pretrained("second-state/FinGPT-MT-Llama-3-8B-LoRA-GGUF")
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.model.eval()
+
+    def _summarize(self, text, summary_token_size):
+        prompt = f"Summarize the following news within {summary_token_size} tokens:\n{text}\nSummary:"
+        response = self.model.generate(self.tokenizer(prompt, return_tensors="pt").to("cuda"))
+        summary = response['choices'][0]
         return summary
     
 class Together(Model_Wrapper):
@@ -68,9 +84,9 @@ class Dummy(Model_Wrapper):
             return text[:summary_token_size]
     
 class Model_Factory:
-    registered_model_class = ("chatgpt", 'together', 'dummy')
+    registered_model_class = ("chatgpt", 'together', 'dummy', "llama")
     @classmethod
-    def create_model(cls, model_class:str, key:str = None, model_name:str = None, *args, **kwargs)->(Chatgpt | Together):
+    def create_model(cls, model_class:str, key:str = None, model_name:str = None, *args, **kwargs)->(Chatgpt | Together | Llama | Dummy):
         assert model_class in cls.registered_model_class, f"Invalid model class name: choose one from {cls.registered_model_class}"
         match model_class:
             case "chatgpt":
@@ -79,6 +95,8 @@ class Model_Factory:
                 return Together(key, model_name)
             case "dummy":
                 return Dummy()
+            case "llama":
+                return Llama(model_name)
             case _:
                 raise
 
