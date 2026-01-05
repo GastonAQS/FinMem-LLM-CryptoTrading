@@ -4,11 +4,13 @@
 # You may need a VPN to connect to Yahoo Finance
 
 import glob
+import os
 import pickle
 import datetime
 import pandas as pd
 import yfinance as yf
 from typing import List
+from pathlib import Path
 
 def download_data(path: str, start_day: str, end_day: str, tickers: List[str]) -> List[pd.DataFrame]:
     """Downloads adjusted close price data for given tickers within a date range."""
@@ -18,18 +20,28 @@ def download_data(path: str, start_day: str, end_day: str, tickers: List[str]) -
         data = yf.download(ticker, start=start_day, end=end_day)
         data = data.reset_index()
         data['Date'] = data['Date'].dt.date
-        data = data[['Date', 'Adj Close']]
-        data = data.rename(columns={'Date': 'date', 'Adj Close': ticker})
+        data = data[['Date', 'Close']]
+        data = data.rename(columns={'Date': 'date', 'Close': 'price'})
+        data['ticker'] = ticker  # Add ticker column
         df_list.append(data)
     return df_list
 
 def combine_dataframes(df_list: List[pd.DataFrame], path: str, tickers: List[str]) -> dict:
     """Combines dataframes of different tickers into a single dictionary and saves it as a pickle file."""
-    df_dicts = [dict(zip(df['date'], df[ticker])) for df, ticker in zip(df_list, tickers)]
-    combined_dict = {date: {'price': {}} for df_dict in df_dicts for date in df_dict}
-    for i, df_dict in enumerate(df_dicts):
-        for date, price in df_dict.items():
-            combined_dict[date]['price'][tickers[i]] = price
+    # Build combined dictionary correctly
+    combined_dict = {}
+
+    for df in df_list:
+        ticker = df['ticker'].iloc[0]  # Get ticker from the dataframe
+        # Use itertuples for better performance - access by position due to MultiIndex columns
+        for row in df.itertuples(index=False):
+            date = row[0]   # date column
+            price = row[1]  # price column
+
+            if date not in combined_dict:
+                combined_dict[date] = {'price': {}}
+            combined_dict[date]['price'][ticker] = price
+
     pkl_filename = path + 'price.pkl'
     with open(pkl_filename, 'wb') as file:
         pickle.dump(combined_dict, file)
@@ -110,14 +122,28 @@ def process_filing_data(start_day: str, end_day: str, kq_path: str, filing_data:
     return nested_10q,nested_10k
     
 if __name__ == '__main__':
-    base_path = '/home/yyu/YJ'
-    price_path = '/home/yyu/YJ/price/'
-    news_path = '/home/yyu/YJ/add_summary_data/'
-    kq_path = '/home/yyu/YJ/10k10q/'
-    filing_data = '/home/yyu/YJ/filing_data.parquet'
-    start_day = '2021-08-01'
-    end_day = '2023-06-01'
-    tickers = ['BAC', 'DIS', 'GM', 'MRNA', 'NVDA', 'PFE']
+    # Get project root directory (parent of data-pipeline)
+    PROJECT_ROOT = Path(__file__).parent.parent
+    DATA_DIR = PROJECT_ROOT / "data"
+
+    # Set up directory paths
+    base_path = str(DATA_DIR)
+    price_path = str(DATA_DIR / "01_raw" / "price") + '/'
+    news_path = str(DATA_DIR / "02_processed") + '/'  # Where summarized news CSVs are saved
+    kq_path = str(DATA_DIR / "01_raw" / "filings") + '/'
+    filing_data = str(DATA_DIR / "01_raw" / "filing_data.parquet")
+
+    # Create directories if they don't exist
+    (DATA_DIR / "01_raw" / "price").mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "01_raw" / "filings").mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "02_processed").mkdir(parents=True, exist_ok=True)
+
+    # Configuration
+    # IMPORTANT: Date range must match the news data in data/02_processed/
+    # Current news data: 2024-11-15 to 2024-12-30
+    start_day = '2024-11-15'
+    end_day = '2024-12-30'
+    tickers = ['TSLA']
     csv_files_pattern = '*.csv'
     col_name = 'summary'
 

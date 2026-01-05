@@ -97,14 +97,23 @@ from httpx import RequestError
 from datetime import datetime
 from dateutil import parser
 from typing import List
+from pathlib import Path
 
+
+# Get project root directory (parent of data-pipeline)
+PROJECT_ROOT = Path(__file__).parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+LOG_DIR = DATA_DIR / "logs"
+OUTPUT_DIR = DATA_DIR / "01_raw"
+
+# Create directories if they don't exist
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # set up logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-handler = logging.FileHandler(
-    os.path.join("data", "03_primary", "filing_fails.log"), mode="w"
-)
+handler = logging.FileHandler(LOG_DIR / "filing_fails.log", mode="w")
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
@@ -113,7 +122,7 @@ logger.addHandler(handler)
 # load environment variables
 logger.info("Program starts")
 
-print(load_dotenv(os.path.join(".env")))
+print(load_dotenv(PROJECT_ROOT / ".env"))
 
 
 # convert time zone
@@ -144,7 +153,7 @@ def get_index_single(symbol: str, type: str) -> pl.DataFrame:
             }
             # whether to break
             response = client.post(
-                ENDPOINT_URL.format(SEC_KEY=os.environ.get("SEC_KEY")),
+                ENDPOINT_URL.format(SEC_KEY=os.environ.get("SEC_KEY", "d77b8ea852ab4265e62288d76b686cabc50a71f72146dfc0a5ab569ca1813478")),
                 json=query_payload,
             )
             if response.status_code != 200:
@@ -153,7 +162,7 @@ def get_index_single(symbol: str, type: str) -> pl.DataFrame:
                 logger.info("[red]Hit limit[/red]")
                 time.sleep(SLEEP_TIME)
                 response = client.post(
-                    ENDPOINT_URL.format(SEC_KEY=os.environ.get("SEC_KEY")),
+                    ENDPOINT_URL.format(SEC_KEY=os.environ.get("SEC_KEY", "d77b8ea852ab4265e62288d76b686cabc50a71f72146dfc0a5ab569ca1813478")),
                     json=query_payload,
                 )
             if response.status_code != 200:
@@ -213,7 +222,7 @@ def request_content_single(section: str, file_url: str) -> str:
     try:
         ret_txt = ""
         cur_extractor_url = EXTRACTOR_URL.format(
-            url=file_url, item=section, SEC_KEY=os.environ.get("SEC_KEY")
+            url=file_url, item=section, SEC_KEY=os.environ.get("SEC_KEY", "d77b8ea852ab4265e62288d76b686cabc50a71f72146dfc0a5ab569ca1813478")
         )
         with httpx.Client() as client:
             response = client.get(cur_extractor_url)
@@ -227,10 +236,14 @@ def request_content_single(section: str, file_url: str) -> str:
         ret_txt += response.text
         return clean(
             ret_txt,
-            fix_unicode=True,
-            to_ascii=True,
-            lower=True,
-            no_line_breaks=True,
+            clean_all=False,
+            extra_spaces=True,
+            stemming=False,
+            stopwords=False,
+            lowercase=True,
+            numbers=False,  # Keep numbers
+            punct=False,  # Keep punctuation
+            stp_lang='english'
         )
     except ValueError as e:
         logger.info(f"[red]{section}, file_url: {file_url}[/red], exception: {e}")
@@ -255,7 +268,7 @@ def request_content(filings: List[str], sections: List[str]) -> List[str]:
 
 if __name__ == "__main__":
     # load data
-    unique_equities = ['''Enter the tickers you want to download here as a list of str''']
+    unique_equities = ['''TSLA''']
 
     # get file index
     ten_k_index_table = get_index(unique_equities, "10-K")
@@ -316,5 +329,7 @@ if __name__ == "__main__":
 
     # filing_data = pl.concat([ten_k_df, ten_q_df, eight_k_df])
     filing_data = pl.concat([ten_k_df, ten_q_df])
-    filing_data.write_parquet(os.path.join("data", "03_primary", "filing_data.parquet"))
+    output_file = OUTPUT_DIR / "filing_data.parquet"
+    filing_data.write_parquet(str(output_file))
+    logger.info(f"Filing data saved to: {output_file}")
     logger.info("Program ends")

@@ -3,10 +3,18 @@ import httpx
 import json
 import subprocess
 from abc import ABC
-from typing import Callable, Union, Dict, Any, Union
+from typing import Callable, Union, Dict, Any, Union, Optional
 
 ### when use tgi model
-api_key = '-' 
+api_key = '-'
+
+# For local llama.cpp models
+try:
+    from llama_cpp import Llama
+    LLAMA_CPP_AVAILABLE = True
+except ImportError:
+    LLAMA_CPP_AVAILABLE = False
+    Llama = None 
 
 def build_llama2_prompt(messages):
     startPrompt = "<s>[INST] "
@@ -140,6 +148,62 @@ class ChatOpenAICompatible(ABC):
                     raise e
 
             return self.parse_response(response)
+
+        return end_point
+
+
+class ChatLlamaCpp(ABC):
+    """
+    Chat interface for local llama.cpp models.
+    Uses llama-cpp-python for direct inference without needing a server.
+    """
+    def __init__(
+        self,
+        model_path: str,
+        system_message: str = "You are a helpful assistant.",
+        n_ctx: int = 4096,
+        n_gpu_layers: int = -1,  # -1 = use all GPU layers
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        other_parameters: Union[Dict[str, Any], None] = None,
+    ):
+        if not LLAMA_CPP_AVAILABLE:
+            raise ImportError("llama-cpp-python is not installed. Install with: pip install llama-cpp-python")
+
+        self.model_path = model_path
+        self.system_message = system_message
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.other_parameters = {} if other_parameters is None else other_parameters
+
+        # Initialize the model
+        print(f"Loading local Llama model from: {model_path}")
+        self.llm = Llama(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            verbose=False,
+        )
+        print(f"✓ Model loaded successfully")
+
+    def guardrail_endpoint(self) -> Callable:
+        def end_point(input: str, **kwargs) -> str:
+            # Build messages in chat format
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant only capable of communicating with valid JSON, and no other text."},
+                {"role": "user", "content": input},
+            ]
+
+            # Use llama.cpp's chat completion
+            response = self.llm.create_chat_completion(
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                **self.other_parameters
+            )
+
+            # Extract the response text
+            return response["choices"][0]["message"]["content"]
 
         return end_point
 

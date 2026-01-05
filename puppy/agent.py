@@ -7,7 +7,7 @@ from .run_type import RunMode
 from .memorydb import BrainDB
 from .portfolio import Portfolio
 from abc import ABC, abstractmethod
-from .chat import ChatOpenAICompatible
+from .chat import ChatOpenAICompatible, ChatLlamaCpp
 from .environment import market_info_type
 from typing import Dict, Union, Any, List
 from .reflection import trading_reflection
@@ -142,12 +142,28 @@ class LLMAgent(Agent):
             self.truncator = TextTruncator(
                 tokenization_model_name=chat_config["tokenization_model_name"]
             )
-        self.guardrail_endpoint = ChatOpenAICompatible(
-            end_point=end_point,
-            model=model,
-            system_message=system_message,
-            other_parameters=chat_config,
-        ).guardrail_endpoint()
+
+        # Choose chat client based on model type
+        if model.startswith("llama-cpp"):
+            # Local llama.cpp model
+            model_path = chat_config.get("model_path", end_point)
+            self.guardrail_endpoint = ChatLlamaCpp(
+                model_path=model_path,
+                system_message=system_message,
+                n_ctx=chat_config.get("n_ctx", 4096),
+                n_gpu_layers=chat_config.get("n_gpu_layers", -1),
+                temperature=chat_config.get("temperature", 0.7),
+                max_tokens=chat_config.get("max_tokens", 512),
+                other_parameters=chat_config,
+            ).guardrail_endpoint()
+        else:
+            # API-based models (GPT, Gemini, TGI)
+            self.guardrail_endpoint = ChatOpenAICompatible(
+                end_point=end_point,
+                model=model,
+                system_message=system_message,
+                other_parameters=chat_config,
+            ).guardrail_endpoint()
         # records
         self.reflection_result_series_dict = {}
         self.access_counter = {}

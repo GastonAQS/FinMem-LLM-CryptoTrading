@@ -172,28 +172,71 @@ def main(Ticker, start_time, end_time, df_dict, col, image_save_path, Start_Date
     )
 
 if __name__ == '__main__':
+    from pathlib import Path
+
+    # Get project root directory
+    PROJECT_ROOT = Path(__file__).parent.parent
+    RESULTS_DIR = PROJECT_ROOT / "results"
+    OUTPUT_DIR = PROJECT_ROOT / "output"
+
+    # Create directories if they don't exist
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
     # Dictionary containing file paths
     """
     file_path = {Model_name: path of model output actions}
+
+    IMPORTANT: Each CSV file must have these columns:
+    - 'date': Trading date (YYYY-MM-DD format)
+    - 'direction': Trading action (typically 1 for buy/hold, 0 for sell, or -1/0/1 for short/hold/long)
+
+    You need to run your trading model/agent first to generate these CSV files.
+    The CSV files contain the trading decisions made by each model on each date.
     """
+
+    # Update these paths to your actual model output files
     file_paths = {
-        'FinMem': '/Users/yuechenjiang/Desktop/CatMemo/result/Tsla-new-full.csv',
-        'GA': '/Users/yuechenjiang/Desktop/CatMemo/result/action_df_tsla_park_v2.csv',
-        'FinGPT': '/Users/yuechenjiang/Desktop/CatMemo/BenchMark/fingpt/tsla.csv',
-        'PPO': '/Users/yuechenjiang/Desktop/CatMemo/result/TSLA_PPO.csv',
-        'A2C': '/Users/yuechenjiang/Desktop/CatMemo/result/TSLA_A2C.csv',
-        'DQN': '/Users/yuechenjiang/Desktop/CatMemo/result/TSLA_DQN.csv'
+        # 'FinMem': str(RESULTS_DIR / 'FinMem_TSLA.csv'),
+        # 'YourModel': str(RESULTS_DIR / 'YourModel_TSLA.csv'),
+        # Add your model result files here
     }
+
+    # Example: If you have result files, uncomment and update:
+    # file_paths = {
+    #     'Model1': str(RESULTS_DIR / 'model1_actions.csv'),
+    #     'Model2': str(RESULTS_DIR / 'model2_actions.csv'),
+    # }
+
+    if not file_paths:
+        print("=" * 60)
+        print("NO MODEL RESULTS FOUND")
+        print("=" * 60)
+        print("\nThis script visualizes trading strategy performance.")
+        print("You need to:")
+        print("1. Run your trading model/agent to generate action CSV files")
+        print("2. Each CSV must have columns: ['date', 'direction']")
+        print("3. Update file_paths dictionary with your result file paths")
+        print("\nExample CSV format:")
+        print("  date,direction")
+        print("  2024-11-15,1")
+        print("  2024-11-18,1")
+        print("  2024-11-19,0")
+        print("\nWhere direction is the trading action:")
+        print("  1 = Buy/Long position")
+        print("  0 = Hold/No position")
+        print("  -1 = Sell/Short position (optional)")
+        print("=" * 60)
+        exit(0)
 
     # Loading DataFrames from the file paths
     df_dict = {key: pd.read_csv(path) for key, path in file_paths.items()}
 
-    # Additional configurations for the main function call
+    # Configuration - Update these to match your data
     Ticker = 'TSLA'
-    start_time = '2022-10-06'
-    end_time = '2023-04-10'
-    col = ['date','direction']
-    image_save_path = '/Users/yuechenjiang/Desktop/CatMemo/Final_result/Park_test/TSLA2022-10-10-2023-04-10.png'
+    start_time = '2024-11-15'  # Match your data range
+    end_time = '2024-12-30'
+    col = ['date', 'direction']  # Column names in your CSV files
+    image_save_path = str(OUTPUT_DIR / f'{Ticker}_{start_time}_{end_time}.png')
     Start_Date = False
 
     # Main function call

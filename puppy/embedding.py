@@ -3,6 +3,14 @@ import numpy as np
 from typing import List, Union
 from langchain_community.embeddings import OpenAIEmbeddings
 
+# For local embeddings
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+    SentenceTransformer = None
+
 
 class OpenAILongerThanContextEmb:
     """
@@ -96,3 +104,95 @@ class OpenAILongerThanContextEmb:
                 raise NotImplementedError(
                     f"Embedding dimension for model {self.emb_model.model} not implemented"
                 )
+
+
+class LocalEmbedding:
+    """
+    Local embedding function using sentence-transformers models.
+    Runs completely locally without any API calls - 100% free and private.
+
+    Recommended models:
+    - 'BAAI/bge-small-en-v1.5' - Good quality, 384 dimensions, fast
+    - 'sentence-transformers/all-MiniLM-L6-v2' - Very fast, 384 dimensions
+    - 'BAAI/bge-base-en-v1.5' - Better quality, 768 dimensions
+    - 'intfloat/e5-small-v2' - Good performance, 384 dimensions
+    """
+
+    def __init__(
+        self,
+        embedding_model: str = "BAAI/bge-small-en-v1.5",
+        device: str = None,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Initializes the Local Embedding object.
+
+        Args:
+            embedding_model (str): HuggingFace model ID. Defaults to "BAAI/bge-small-en-v1.5".
+            device (str, optional): Device to use ('cuda', 'cpu', or None for auto). Defaults to None.
+            verbose (bool): Whether to show progress during model loading. Defaults to False.
+
+        Returns:
+            None
+        """
+        if not SENTENCE_TRANSFORMERS_AVAILABLE:
+            raise ImportError(
+                "sentence-transformers is not installed. "
+                "Install with: pip install sentence-transformers"
+            )
+
+        self.model_name = embedding_model
+        self.verbose = verbose
+
+        if verbose:
+            print(f"Loading local embedding model: {embedding_model}")
+
+        self.emb_model = SentenceTransformer(embedding_model, device=device)
+
+        if verbose:
+            print(f"✓ Model loaded successfully")
+            print(f"  Embedding dimension: {self.get_embedding_dimension()}")
+            print(f"  Device: {self.emb_model.device}")
+
+    def _emb(self, text: Union[List[str], str]) -> List[List[float]]:
+        """
+        Performs embedding on text.
+
+        Args:
+            text (Union[List[str], str]): A text string or list of texts to be embedded.
+
+        Returns:
+            List[List[float]]: The embeddings of the input text.
+        """
+        if isinstance(text, str):
+            text = [text]
+
+        # SentenceTransformer.encode returns numpy array, convert to list
+        embeddings = self.emb_model.encode(
+            text,
+            show_progress_bar=self.verbose,
+            convert_to_numpy=True
+        )
+
+        return embeddings.tolist()
+
+    def __call__(self, text: Union[List[str], str]) -> np.ndarray:
+        """
+        Performs embedding on a list of text.
+
+        Args:
+            text (Union[List[str], str]): A text string or list of texts to be embedded.
+
+        Returns:
+            np.ndarray: The embedding of the input text as a NumPy array.
+        """
+        return np.array(self._emb(text)).astype("float32")
+
+    def get_embedding_dimension(self) -> int:
+        """
+        Returns the dimension of the embedding.
+
+        Returns:
+            int: The dimension of the embedding.
+        """
+        return self.emb_model.get_sentence_embedding_dimension()
